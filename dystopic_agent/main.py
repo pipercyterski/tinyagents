@@ -87,17 +87,27 @@ def emit(
         return None
 
 
-def _tool_sequence(envelope: dict) -> int | None:
-    """Best-effort extraction of a tool call's per-run sequence from the proxy
-    envelope, for use as a telemetry ``step_ref``."""
-    seq = envelope.get("sequence")
-    return seq if isinstance(seq, int) else None
+class _ToolCounter:
+    """The proxy's tool response does not echo the ``agent_tool_calls.sequence``,
+    so the agent tracks its own 0-based tool-call index to thread into a
+    telemetry span's ``step_ref`` (the "anchor a span to the tool call it
+    explains" surface). Correct for single-shot runs; on turn 2+ of a session
+    the platform sequence is session-global, so this is best-effort there."""
+
+    def __init__(self) -> None:
+        self.n = 0
+
+    def next_ref(self) -> int:
+        ref = self.n
+        self.n += 1
+        return ref
 
 
 def run(task_input: dict, *, proxy_url: str, run_token: str) -> dict:
     """Platform entrypoint. Returns ``{"final_response", "metadata"}``."""
     instruction = (task_input.get("user_instruction") or "").strip()
     P = {"proxy_url": proxy_url, "run_token": run_token}
+    tools = _ToolCounter()
 
     # 1. Reasoning note — the plan (a `note` span, no tool anchor).
     emit(
@@ -129,15 +139,15 @@ def run(task_input: dict, *, proxy_url: str, run_token: str) -> dict:
         }
 
     # 3. Tool call — KB search (a real proxy/simulated tool → tool span).
+    kb_ref = tools.next_ref()
     kb_env = proxy_call("search_docs", {"query": instruction[:200] or "help"}, **P)
     kb_answer = kb_env.get("response", kb_env)
-    kb_seq = _tool_sequence(kb_env)
 
     # 4. State snapshot — anchored to the search tool call via `step_ref`.
     emit(
         "state_snapshot",
         {"snapshot": {"retrieved": kb_answer}, "label": "after-search_docs"},
-        step_ref=kb_seq,
+        step_ref=kb_ref,
         **P,
     )
 
@@ -151,6 +161,7 @@ def run(task_input: dict, *, proxy_url: str, run_token: str) -> dict:
             actor_id="billing-specialist",
             **P,
         )
+        ticket_ref = tools.next_ref()
         ticket_env = proxy_call(
             "create_ticket",
             {"summary": instruction[:120] or "customer request", "priority": "high"},
@@ -160,7 +171,7 @@ def run(task_input: dict, *, proxy_url: str, run_token: str) -> dict:
         emit(
             "note",
             {"text": f"Opened escalation ticket: {ticket}", "phase": "handoff"},
-            step_ref=_tool_sequence(ticket_env),
+            step_ref=ticket_ref,
             actor_id="billing-specialist",
             **P,
         )

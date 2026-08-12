@@ -157,7 +157,12 @@ def run(task_input: dict, *, proxy_url: str, run_token: str) -> dict:
     if wants_human:
         emit(
             "handoff_traversal",
-            {"from": "triage", "to": "billing-specialist", "reason": "human/refund escalation"},
+            {
+                "from_sub_agent": "triage",
+                "to_sub_agent": "billing-specialist",
+                "reason": "human/refund escalation",
+                "selected_because": "detected a refund / human-agent request",
+            },
             actor_id="billing-specialist",
             **P,
         )

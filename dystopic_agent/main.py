@@ -102,7 +102,7 @@ def run(task_input: dict, *, proxy_url: str, run_token: str) -> dict:
     # 1. Reasoning note — the plan (a `note` span, no tool anchor).
     emit(
         "note",
-        {"text": "Triage: classify the request, then search the KB.", "phase": "plan"},
+        {"text": "Triage v2: classify the request, run the guardrail, then search the KB.", "phase": "plan"},
         **P,
     )
 
